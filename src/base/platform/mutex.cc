@@ -81,7 +81,7 @@ static V8_INLINE void InitializeNativeHandle(pthread_mutex_t* mutex) {
   pthread_mutexattr_t attr;
   result = pthread_mutexattr_init(&attr);
   DCHECK_EQ(0, result);
-  result = pthread_mutexattr_settype(&attr, PTHREAD_MUTEX_ERRORCHECK);
+  result = pthread_mutexattr_settype(&attr, 0);
   DCHECK_EQ(0, result);
   result = pthread_mutex_init(mutex, &attr);
   DCHECK_EQ(0, result);

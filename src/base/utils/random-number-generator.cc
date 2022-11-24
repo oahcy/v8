@@ -16,6 +16,10 @@
 #include "src/base/platform/time.h"
 #include "src/base/platform/wrappers.h"
 
+#if V8_OS_NX
+#include <nn/crypto/crypto_Csrng.h>
+#endif
+
 namespace v8 {
 namespace base {
 
@@ -58,6 +62,10 @@ RandomNumberGenerator::RandomNumberGenerator() {
   // no file descriptor involved.
   int64_t seed;
   arc4random_buf(&seed, sizeof(seed));
+  SetSeed(seed);
+#elif V8_OS_NX
+  int64_t seed;
+  nn::crypto::GenerateCryptographicallyRandomBytes(&seed, sizeof(seed));
   SetSeed(seed);
 #else
   // Gather entropy from /dev/urandom if available.

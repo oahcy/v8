@@ -67,6 +67,11 @@ int64_t ComputeThreadTicks() {
 // on the system. FreeBSD 6 has CLOCK_MONOTONIC but defines
 // _POSIX_MONOTONIC_CLOCK to -1.
 V8_INLINE int64_t ClockNow(clockid_t clk_id) {
+#if V8_OS_NX
+if (clk_id != CLOCK_REALTIME) {
+  return 0;
+}
+#endif
 #if (defined(_POSIX_MONOTONIC_CLOCK) && _POSIX_MONOTONIC_CLOCK >= 0) || \
   defined(V8_OS_BSD) || defined(V8_OS_ANDROID)
 // On AIX clock_gettime for CLOCK_THREAD_CPUTIME_ID outputs time with
@@ -738,7 +743,7 @@ TimeTicks TimeTicks::Now() {
 
 // static
 bool TimeTicks::IsHighResolution() {
-#if V8_OS_MACOSX
+#if (defined(V8_OS_MACOSX) || defined(V8_OS_NX))
   return true;
 #elif V8_OS_POSIX
   static bool is_high_resolution = IsHighResolutionTimer(CLOCK_MONOTONIC);

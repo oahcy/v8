@@ -260,8 +260,9 @@ void StackDumpSignalHandler(int signal, siginfo_t* info, void* void_context) {
     debug::StackTrace().Print();
     PrintToStderr("[end of stack trace]\n");
   }
-
+#if !V8_OS_NX
   if (::signal(signal, SIG_DFL) == SIG_ERR) _exit(1);
+#endif
 }
 
 class PrintBacktraceOutputHandler : public BacktraceOutputHandler {
@@ -327,6 +328,7 @@ void WarmUpBacktrace() {
 }  // namespace
 
 bool EnableInProcessStackDumping() {
+  #if !V8_OS_NX
   // When running in an application, our code typically expects SIGPIPE
   // to be ignored.  Therefore, when testing that same code, it should run
   // with SIGPIPE ignored as well.
@@ -355,6 +357,9 @@ bool EnableInProcessStackDumping() {
   dump_stack_in_signal_handler = true;
 
   return success;
+  #else
+  return true;
+  #endif
 }
 
 void DisableSignalStackDump() {

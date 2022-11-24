@@ -31,7 +31,9 @@ namespace base {
 
 // static
 int SysInfo::NumberOfProcessors() {
-#if V8_OS_OPENBSD
+#if V8_OS_NX
+  return  1;
+#elif V8_OS_OPENBSD
   int mib[2] = {CTL_HW, HW_NCPU};
   int ncpu = 0;
   size_t len = sizeof(ncpu);

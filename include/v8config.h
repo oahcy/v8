@@ -86,6 +86,9 @@ path. Add it with -I<path> to the command line
 # define V8_OS_ANDROID 1
 # define V8_OS_LINUX 1
 # define V8_OS_POSIX 1
+#elif defined(__nx__)
+# define V8_OS_NX 1
+# define V8_OS_POSIX 1
 #elif defined(__APPLE__)
 # define V8_OS_BSD 1
 # define V8_OS_MACOSX 1

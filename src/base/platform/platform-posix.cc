@@ -26,6 +26,13 @@
 #include <sys/sysctl.h>  // NOLINT, for sysctl
 #endif
 
+#include <nv/nv_MemoryManagement.h>
+#include <nn/nn_Assert.h>
+#include <nn/nn_Common.h>
+#include <nn/nlib/Platform.h>
+#include <nn/os/os_VirtualAddressMemoryApi.h>
+#include <nn/os/os_DebugApi.h>
+
 #if defined(ANDROID) && !defined(V8_ANDROID_LOG_STDOUT)
 #define LOG_TAG "v8"
 #include <android/log.h>  // NOLINT
@@ -49,6 +56,10 @@
 #if V8_OS_MACOSX
 #include <dlfcn.h>
 #include <mach/mach.h>
+#endif
+
+#if V8_OS_NX
+#include <cstdlib>
 #endif
 
 #if V8_OS_LINUX
@@ -162,12 +173,27 @@ int GetFlagsForMemoryPermission(OS::MemoryPermission access,
 }
 
 void* Allocate(void* hint, size_t size, OS::MemoryPermission access,
-               PageType page_type) {
+               PageType page_type, size_t alignment = 0) {
+#if V8_OS_NX
+  void* result = nullptr;
+  //nn::os::MemoryInfo meminfo;
+  //::os::QueryMemoryInfo(&meminfo);
+  auto usagesize = nn::os::GetVirtualAddressMemoryResourceUsage();
+  auto ret  = nn::os::AllocateAddressRegion(reinterpret_cast<uintptr_t*>(&result), size);
+  //printf("AllocateAddressRegion result : %p, ret : %d, size:%ld\n", result, ret.IsSuccess(), size);
+  ret = nn::os::AllocateMemoryPages(reinterpret_cast<uintptr_t>(result), size);
+  //usagesize = nn::os::GetVirtualAddressMemoryResourceUsage();
+  //printf("AllocateMemoryPages result : %p, ret : %d, size:%ld\n", result, ret.IsSuccess(), size);
+  //printf("total mem : %llu, use mem: %lu\n", meminfo.totalAvailableMemorySize, meminfo.totalUsedMemorySize);
+  //nn::os::QueryMemoryInfo(&meminfo);
+  return result;
+#else
   int prot = GetProtectionFromMemoryPermission(access);
   int flags = GetFlagsForMemoryPermission(access, page_type);
   void* result = mmap(hint, size, prot, flags, kMmapFd, kMmapFdOffset);
   if (result == MAP_FAILED) return nullptr;
   return result;
+#endif
 }
 
 #endif  // !V8_OS_FUCHSIA
@@ -244,11 +270,15 @@ int OS::ActivationFrameAlignment() {
 
 // static
 size_t OS::AllocatePageSize() {
+#if V8_OS_NX
+  return nn::os::MemoryPageSize;
+#else
 #if defined(V8_TARGET_OS_MACOSX) && V8_HOST_ARCH_ARM64
   return kAppleArmPageSize;
 #else
   static size_t page_size = static_cast<size_t>(sysconf(_SC_PAGESIZE));
   return page_size;
+#endif
 #endif
 }
 
@@ -352,6 +382,7 @@ void* OS::GetRandomMmapAddr() {
 #endif
 #endif
 #endif
+  //printf("raw addr:%lx\n", raw_addr);
   return reinterpret_cast<void*>(raw_addr);
 }
 
@@ -367,13 +398,14 @@ void* OS::Allocate(void* hint, size_t size, size_t alignment,
   // Add the maximum misalignment so we are guaranteed an aligned base address.
   size_t request_size = size + (alignment - page_size);
   request_size = RoundUp(request_size, OS::AllocatePageSize());
-  void* result = base::Allocate(hint, request_size, access, PageType::kPrivate);
+  void* result = base::Allocate(hint, request_size, access, PageType::kPrivate, alignment);
   if (result == nullptr) return nullptr;
 
   // Unmap memory allocated before the aligned base address.
   uint8_t* base = static_cast<uint8_t*>(result);
   uint8_t* aligned_base = reinterpret_cast<uint8_t*>(
       RoundUp(reinterpret_cast<uintptr_t>(base), alignment));
+  //printf("OS::Allocate base:%p, aligned_base:%p, size:%lx, request_size:%lx, alignment:%lx\n", base, aligned_base, size, request_size, alignment);
   if (aligned_base != base) {
     DCHECK_LT(base, aligned_base);
     size_t prefix_size = static_cast<size_t>(aligned_base - base);
@@ -381,14 +413,16 @@ void* OS::Allocate(void* hint, size_t size, size_t alignment,
     request_size -= prefix_size;
   }
   // Unmap memory allocated after the potentially unaligned end.
+#if !V8_OS_NX
   if (size != request_size) {
     DCHECK_LT(size, request_size);
     size_t suffix_size = request_size - size;
     CHECK(Free(aligned_base + size, suffix_size));
     request_size -= suffix_size;
   }
-
   DCHECK_EQ(size, request_size);
+#endif
+
   return static_cast<void*>(aligned_base);
 }
 
@@ -402,14 +436,24 @@ void* OS::AllocateShared(size_t size, MemoryPermission access) {
 bool OS::Free(void* address, const size_t size) {
   DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % AllocatePageSize());
   DCHECK_EQ(0, size % AllocatePageSize());
+  #if V8_OS_NX
+  //printf("Free : %p, size:%lu\n", address, size);
+  return nn::os::FreeMemoryPages(reinterpret_cast<uintptr_t>(address), size).IsSuccess();
+  #else
   return munmap(address, size) == 0;
+  #endif
 }
 
 // static
 bool OS::Release(void* address, size_t size) {
   DCHECK_EQ(0, reinterpret_cast<uintptr_t>(address) % CommitPageSize());
   DCHECK_EQ(0, size % CommitPageSize());
+  #if V8_OS_NX
+  //printf("Release : %p, size:%lu\n", address, size);
+  return nn::os::FreeMemoryPages(reinterpret_cast<uintptr_t>(address), size).IsSuccess();
+  #else
   return munmap(address, size) == 0;
+  #endif
 }
 
 // static
@@ -418,7 +462,11 @@ bool OS::SetPermissions(void* address, size_t size, MemoryPermission access) {
   DCHECK_EQ(0, size % CommitPageSize());
 
   int prot = GetProtectionFromMemoryPermission(access);
+#if V8_OS_NX
+  int ret = 0;
+#else
   int ret = mprotect(address, size, prot);
+#endif
 
   // MacOS 11.2 on Apple Silicon refuses to switch permissions from
   // rwx to none. Just use madvise instead.
@@ -458,6 +506,8 @@ bool OS::DiscardSystemPages(void* address, size_t size) {
   int ret = madvise(address, size, MADV_FREE_REUSABLE);
 #elif defined(_AIX) || defined(V8_OS_SOLARIS)
   int ret = madvise(reinterpret_cast<caddr_t>(address), size, MADV_FREE);
+#elif V8_OS_NX
+  int ret = 0;
 #else
   int ret = madvise(address, size, MADV_FREE);
 #endif
@@ -469,7 +519,7 @@ bool OS::DiscardSystemPages(void* address, size_t size) {
 // imply runtime support.
 #if defined(_AIX) || defined(V8_OS_SOLARIS)
     ret = madvise(reinterpret_cast<caddr_t>(address), size, MADV_DONTNEED);
-#else
+#elif !V8_OS_NX
     ret = madvise(address, size, MADV_DONTNEED);
 #endif
   }
@@ -550,45 +600,12 @@ class PosixMemoryMappedFile final : public OS::MemoryMappedFile {
 // static
 OS::MemoryMappedFile* OS::MemoryMappedFile::open(const char* name,
                                                  FileMode mode) {
-  const char* fopen_mode = (mode == FileMode::kReadOnly) ? "r" : "r+";
-  if (FILE* file = fopen(name, fopen_mode)) {
-    if (fseek(file, 0, SEEK_END) == 0) {
-      long size = ftell(file);  // NOLINT(runtime/int)
-      if (size == 0) return new PosixMemoryMappedFile(file, nullptr, 0);
-      if (size > 0) {
-        int prot = PROT_READ;
-        int flags = MAP_PRIVATE;
-        if (mode == FileMode::kReadWrite) {
-          prot |= PROT_WRITE;
-          flags = MAP_SHARED;
-        }
-        void* const memory =
-            mmap(OS::GetRandomMmapAddr(), size, prot, flags, fileno(file), 0);
-        if (memory != MAP_FAILED) {
-          return new PosixMemoryMappedFile(file, memory, size);
-        }
-      }
-    }
-    fclose(file);
-  }
   return nullptr;
 }
 
 // static
 OS::MemoryMappedFile* OS::MemoryMappedFile::create(const char* name,
                                                    size_t size, void* initial) {
-  if (FILE* file = fopen(name, "w+")) {
-    if (size == 0) return new PosixMemoryMappedFile(file, nullptr, 0);
-    size_t result = fwrite(initial, 1, size, file);
-    if (result == size && !ferror(file)) {
-      void* memory = mmap(OS::GetRandomMmapAddr(), result,
-                          PROT_READ | PROT_WRITE, MAP_SHARED, fileno(file), 0);
-      if (memory != MAP_FAILED) {
-        return new PosixMemoryMappedFile(file, memory, result);
-      }
-    }
-    fclose(file);
-  }
   return nullptr;
 }
 
@@ -618,7 +635,7 @@ int OS::GetCurrentThreadId() {
 #elif V8_OS_SOLARIS
   return static_cast<int>(pthread_self());
 #else
-  return static_cast<int>(reinterpret_cast<intptr_t>(pthread_self()));
+  return static_cast<int>(reinterpret_cast<uintptr_t>(pthread_self()));
 #endif
 }
 
@@ -637,8 +654,9 @@ void OS::ExitProcess(int exit_code) {
 #if !defined(V8_OS_FUCHSIA)
 int OS::GetUserTime(uint32_t* secs, uint32_t* usecs) {
   struct rusage usage;
-
+#if !V8_OS_NX
   if (getrusage(RUSAGE_SELF, &usage) < 0) return -1;
+#endif
   *secs = static_cast<uint32_t>(usage.ru_utime.tv_sec);
   *usecs = static_cast<uint32_t>(usage.ru_utime.tv_usec);
   return 0;
@@ -695,7 +713,11 @@ bool OS::isDirectorySeparator(const char ch) {
 
 
 FILE* OS::OpenTemporaryFile() {
+#if V8_OS_NX
+  return nullptr;
+#else
   return tmpfile();
+#endif
 }
 
 const char* const OS::LogFileOpenMode = "w+";

@@ -221,7 +221,7 @@ inline void MemsetPointer(Address* dest, Address value, size_t counter) {
 #elif V8_HOST_ARCH_X64
 #define STOS "stosq"
 #endif
-
+//printf("MemsetPointer adderss : %p, val:%p, counter:%lu\n", dest, (void*)value, (unsigned long)counter);
 #if defined(MEMORY_SANITIZER)
   // MemorySanitizer does not understand inline assembly.
 #undef STOS

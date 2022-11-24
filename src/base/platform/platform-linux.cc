@@ -129,6 +129,7 @@ void OS::SignalCodeMovingGC() {
   // it. This injects a GC marker into the stream of events generated
   // by the kernel and allows us to synchronize V8 code log and the
   // kernel log.
+  #if !V8_OS_NX
   long size = sysconf(_SC_PAGESIZE);  // NOLINT(runtime/int)
   FILE* f = fopen(OS::GetGCFakeMMapFile(), "w+");
   if (f == nullptr) {
@@ -140,6 +141,7 @@ void OS::SignalCodeMovingGC() {
   DCHECK_NE(MAP_FAILED, addr);
   CHECK(Free(addr, size));
   fclose(f);
+  #endif
 }
 
 void OS::AdjustSchedulingParams() {}

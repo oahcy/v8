@@ -14,6 +14,7 @@
 #include "src/base/macros.h"
 
 #if V8_OS_POSIX && !V8_OS_CYGWIN && !V8_OS_FUCHSIA
+#include <pthread.h>
 #define USE_SIGNALS
 #endif
 

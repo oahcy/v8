@@ -321,6 +321,8 @@ class SignalHandler {
 
  private:
   static void Install() {
+    
+#if !V8_OS_NX
     struct sigaction sa;
     sa.sa_sigaction = &HandleProfilerSignal;
     sigemptyset(&sa.sa_mask);
@@ -331,13 +333,16 @@ class SignalHandler {
 #endif
     signal_handler_installed_ =
         (sigaction(SIGPROF, &sa, &old_signal_handler_) == 0);
+#endif
   }
 
   static void Restore() {
+#if !V8_OS_NX
     if (signal_handler_installed_) {
       sigaction(SIGPROF, &old_signal_handler_, nullptr);
       signal_handler_installed_ = false;
     }
+#endif
   }
 
   static void FillRegisterState(void* context, RegisterState* regs);
@@ -347,12 +352,16 @@ class SignalHandler {
   static base::LazyMutex mutex_;
   static int client_count_;
   static bool signal_handler_installed_;
+#if !V8_OS_NX
   static struct sigaction old_signal_handler_;
+#endif
 };
 
 base::LazyMutex SignalHandler::mutex_ = LAZY_MUTEX_INITIALIZER;
 int SignalHandler::client_count_ = 0;
+#if !V8_OS_NX
 struct sigaction SignalHandler::old_signal_handler_;
+#endif
 bool SignalHandler::signal_handler_installed_ = false;
 
 void SignalHandler::HandleProfilerSignal(int signal, siginfo_t* info,
@@ -562,7 +571,9 @@ void Sampler::DoSample() {
   if (!SignalHandler::Installed()) return;
   DCHECK(IsActive());
   SetShouldRecordSample();
+#if !V8_OS_NX
   pthread_kill(platform_data()->vm_tid(), SIGPROF);
+#endif
 }
 
 #elif V8_OS_WIN || V8_OS_CYGWIN
